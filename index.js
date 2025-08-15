@@ -89,7 +89,7 @@ function analyzeResume(text) {
 // Gemini Resume Feedback
 async function getGeminiFeedback(text) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     const trimmed = text.length > 10000 ? text.slice(0, 10000) : text;
 
     const prompt = `
