@@ -50,8 +50,16 @@ app.get("/", (req, res) => {
 const upload = multer({
   dest: "uploads/",
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === "application/pdf") cb(null, true);
-    else cb(new Error("Only PDF files are allowed"));
+    // Check for PDF files by MIME type or file extension
+    const isPdf = file.mimetype === "application/pdf" || 
+                  file.mimetype === "application/octet-stream" || // Google Drive files often have this MIME type
+                  (file.originalname && file.originalname.toLowerCase().endsWith('.pdf'));
+    
+    if (isPdf) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF files are allowed"));
+    }
   },
 });
 
@@ -120,14 +128,27 @@ ${trimmed}
     const result = await model.generateContent(prompt);
     return (await result.response).text();
   } catch (err) {
-    console.error("❌ error:", err);
-    return "❌ AI failed to generate feedback.";
+    console.error("❌ Gemini error:", err);
+    return "❌ Gemini AI failed to generate feedback.";
   }
 }
 
 // Resume Feedback API
 app.post("/api/resume-feedback", upload.single("resume"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ feedback: "No file uploaded or invalid type" });
+  // Log file information for debugging
+  if (req.file) {
+    console.log("File received:", {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      filename: req.file.filename
+    });
+  }
+  
+  if (!req.file) {
+    console.log("No file uploaded or invalid type");
+    return res.status(400).json({ error: "No file uploaded or invalid type" });
+  }
 
   const filePath = req.file.path;
 
@@ -135,7 +156,10 @@ app.post("/api/resume-feedback", upload.single("resume"), async (req, res) => {
     const data = await pdfParse(fs.readFileSync(filePath));
     const text = data.text;
 
-    if (!text.trim()) throw new Error("Empty resume content");
+    if (!text.trim()) {
+      console.log("Empty resume content");
+      throw new Error("Empty resume content");
+    }
 
     const staticFeedback = analyzeResume(text);
     const geminiFeedback = await getGeminiFeedback(text);
@@ -149,6 +173,7 @@ app.post("/api/resume-feedback", upload.single("resume"), async (req, res) => {
         .replace(/\n?```/, '');
       parsedGeminiFeedback = JSON.parse(jsonString);
     } catch (parseError) {
+      console.log("Error parsing Gemini feedback, using raw feedback");
       // If parsing fails, use the raw feedback
       parsedGeminiFeedback = {
         overall_impression: geminiFeedback,
@@ -166,14 +191,35 @@ app.post("/api/resume-feedback", upload.single("resume"), async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Resume analysis failed:", err);
-    res.status(500).json({ feedback: "Error analyzing resume" });
+    res.status(500).json({ error: "Error analyzing resume: " + err.message });
   } finally {
-    fs.unlink(filePath, () => {});
+    fs.unlink(filePath, (err) => {
+      if (err) console.error("Error deleting file:", err);
+    });
   }
 });
 
 // Resume-JD Match API
 app.post("/api/match", upload.fields([{ name: "resume" }, { name: "jd" }]), async (req, res) => {
+  // Log file information for debugging
+  if (req.files?.resume?.[0]) {
+    console.log("Resume file received:", {
+      originalname: req.files.resume[0].originalname,
+      mimetype: req.files.resume[0].mimetype,
+      size: req.files.resume[0].size,
+      filename: req.files.resume[0].filename
+    });
+  }
+  
+  if (req.files?.jd?.[0]) {
+    console.log("JD file received:", {
+      originalname: req.files.jd[0].originalname,
+      mimetype: req.files.jd[0].mimetype,
+      size: req.files.jd[0].size,
+      filename: req.files.jd[0].filename
+    });
+  }
+  
   try {
     if (!req.files?.resume || !req.files?.jd)
       return res.status(400).json({ error: "Both resume and JD files are required." });
